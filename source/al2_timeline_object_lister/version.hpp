@@ -9,6 +9,6 @@ namespace apn::timeline_object_lister
 		//
 		// コンストラクタです。
 		//
-		version_t() : version_base_t(L"リストアップ", L"🐍リストアップ🔖", L"r1") {}
+		version_t() : version_base_t(L"リストアップ", L"🐍リストアップ🔖", L"r2") {}
 	} version;
 }
