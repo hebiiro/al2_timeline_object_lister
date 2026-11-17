@@ -50,8 +50,8 @@ namespace apn::timeline_object_lister
 			// メインウィンドウを登録します。
 			host->register_window_client(version_base->get_name().c_str(), main_window);
 
-			// フォーカスオブジェクトが変更された時のリスナーです。
-			const auto listener = [](void* param)
+			// タイムラインが変更された時のリスナーです。
+			constexpr auto listener = [](void* param)
 			{
 				if (editor.handle->get_edit_state() != editor.handle->EDIT_STATE_EDIT) return;
 
@@ -61,13 +61,24 @@ namespace apn::timeline_object_lister
 
 			// イベントリスナーを登録します。
 			// UPDATE_OBJECTはオブジェクトが移動したことを検出します。
-			// CHANGE_EDIT_SCENEはシーンが切り替わったことを検出します。
 			// CHANGE_FOCUS_OBJECTはフォーカスオブジェクトが切り替わったことを検出します。
-			host->register_event_listener(EVENT_TYPE::UPDATE_OBJECT, nullptr, listener);
-			host->register_event_listener(EVENT_TYPE::CHANGE_EDIT_SCENE, nullptr, listener);
-			host->register_event_listener(EVENT_TYPE::CHANGE_FOCUS_OBJECT, nullptr, listener);
+			// CHANGE_EDIT_SCENEはシーンが切り替わったことを検出します。
+			host->register_event_listener(EVENT_TYPE::UPDATE_OBJECT, nullptr, [](void* param)
+			{
+				MY_TRACE("EVENT_TYPE::UPDATE_OBJECT\n");
+
+				listener(param);
+			});
+			host->register_event_listener(EVENT_TYPE::CHANGE_FOCUS_OBJECT, nullptr, [](void* param)
+			{
+				MY_TRACE("EVENT_TYPE::CHANGE_FOCUS_OBJECT\n");
+
+				listener(param);
+			});
 			host->register_event_listener(EVENT_TYPE::CHANGE_EDIT_SCENE, nullptr, [](void* param)
 			{
+				MY_TRACE("EVENT_TYPE::CHANGE_EDIT_SCENE\n");
+
 				// 初回に1回だけ初期化後初期化処理を実行します。
 				static BOOL is_initialized = FALSE;
 				if (!is_initialized)
@@ -77,29 +88,33 @@ namespace apn::timeline_object_lister
 					effect_manager.post_init();
 					color_manager.post_init();
 				}
+
+				listener(param);
 			});
 
 			return TRUE;
 		}
 
 		//
-		// オブジェクト一覧をリフレッシュするタイマーのIDです。
-		//
-		UINT_PTR refresh_timer_id = {};
-
-		//
-		// 編集セクションを使用して、
+		// 読み込み専用の編集セクションを使用して、
 		// 現在のシーンにある全てのオブジェクトをリストアップします。
 		//
 		BOOL build_item_list_from_exedit_memory()
 		{
 			MY_TRACE_FUNC("");
 
-			// 編集セクションを開始します。
-			return editor.handle->call_edit_section([](EDIT_SECTION* edit)
+			// 読み込み専用の編集セクションを開始します。
+			auto result = editor.handle->call_read_section(
+				[](EDIT_SECTION* edit)
 			{
 				app_impl.build_item_list_from_exedit_memory(edit);
 			});
+
+			// デバッグ用の処理です。
+			if (!result) MY_TRACE("call_read_section()が失敗しました\n");
+
+			// 結果を返します。
+			return result;
 		}
 
 		//
@@ -110,11 +125,15 @@ namespace apn::timeline_object_lister
 		{
 			MY_TRACE_FUNC("");
 
+			// 編集情報を取得します。
+			EDIT_INFO edit_info = {};
+			editor.handle->get_edit_info(&edit_info, sizeof(edit_info));
+
 			// 編集情報が無効の場合は何もしません。
-			if (edit->info->scale <= 0 || edit->info->rate <= 0) return FALSE;
+			if (edit_info.scale <= 0 || edit_info.rate <= 0) return FALSE;
 
 			// フレーム数を時間に変換するための倍率を算出します。
-			auto frame_to_sec_scale = (double)edit->info->scale / edit->info->rate;
+			auto frame_to_sec_scale = (double)edit_info.scale / edit_info.rate;
 
 			//
 			// この関数は、文字列を追加します。
@@ -201,7 +220,7 @@ namespace apn::timeline_object_lister
 				if (edit->get_object_section_num(object) > 1) add_string(status_string, L"中間点あり");
 
 				// カーソルフレームと交差している場合は
-				if (object_layer_frame.start <= edit->info->frame && edit->info->frame <= object_layer_frame.end) add_string(status_string, L"カーソル");
+				if (object_layer_frame.start <= edit_info.frame && edit_info.frame <= object_layer_frame.end) add_string(status_string, L"カーソル");
 
 				// フォーカスオブジェクトの場合は
 				if (object == edit->get_focus_object()) add_string(status_string, L"フォーカス");
@@ -264,7 +283,7 @@ namespace apn::timeline_object_lister
 			finder.nodes.clear();
 
 			// 全てのレイヤーを走査します。
-			for (auto layer = 0; layer <= edit->info->layer_max; layer++)
+			for (auto layer = 0; layer <= edit_info.layer_max; layer++)
 			{
 				// レイヤーのRGBAを取得します。
 				auto layer_rgba = edit->get_layer_color(layer);
@@ -358,27 +377,32 @@ namespace apn::timeline_object_lister
 			if (!::IsWindowVisible(main_window)) return FALSE;
 
 			// タイマーを開始します。
-			refresh_timer_id = ::SetTimer(main_window, refresh_timer_id, hive.refresh_delay,
-				[](HWND hwnd, UINT message, UINT_PTR timer_id, DWORD time)
-			{
-				// オブジェクト一覧を構築します。
-				app_impl.build_item_list_from_exedit_memory();
+			::SetTimer(main_window, main_window.k_timer_id.k_refresh_list, hive.refresh_delay, nullptr);
 
-				// オブジェクト一覧をソートします。
-				sort.apply();
+			return TRUE;
+		}
 
-				// オブジェクト一覧を絞り込みます。
-				finder.apply();
+		//
+		// オブジェクト一覧をリフレッシュします。
+		//
+		virtual BOOL reflect_refresh_list() override
+		{
+			MY_TRACE_FUNC("");
 
-				// ダイアログのリストビューをリフレッシュします。
-				listview.to_ui();
+			// オブジェクト一覧を構築します。
+			build_item_list_from_exedit_memory();
 
-				// ヘッダーコントロールをリフレッシュします。
-				header.to_ui();
+			// オブジェクト一覧をソートします。
+			sort.apply();
 
-				// タイマーを終了します。
-				::KillTimer(main_window, app_impl.refresh_timer_id), app_impl.refresh_timer_id = {};
-			});
+			// オブジェクト一覧を絞り込みます。
+			finder.apply();
+
+			// ダイアログのリストビューをリフレッシュします。
+			listview.to_ui();
+
+			// ヘッダーコントロールをリフレッシュします。
+			header.to_ui();
 
 			return TRUE;
 		}

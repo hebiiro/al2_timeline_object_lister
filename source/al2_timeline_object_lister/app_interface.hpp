@@ -13,6 +13,7 @@ namespace apn::timeline_object_lister
 
 		virtual BOOL apply_finder() = 0;
 		virtual BOOL refresh_list() = 0;
+		virtual BOOL reflect_refresh_list() = 0;
 		virtual BOOL reset_list() = 0;
 		virtual BOOL reset_sort() = 0;
 		virtual BOOL reset_finder() = 0;

@@ -245,8 +245,10 @@ namespace apn::timeline_object_lister
 					{
 					case k_timer_id.k_refresh_list:
 						{
+							MY_TRACE_FUNC("WM_TIMER, k_timer_id.k_refresh_list");
+
 							// リストをリフレッシュします。
-							app->refresh_list();
+							app->reflect_refresh_list();
 
 							// タイマーを終了します。
 							::KillTimer(hwnd, w_param);
